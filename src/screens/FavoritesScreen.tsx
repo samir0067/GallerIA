@@ -1,15 +1,18 @@
 /**
  * screens/FavoritesScreen.tsx
  *
- * Écran des favoris : affiche la liste des photos sauvegardées par l'utilisateur.
- * Utilise useFavorites() qui lit depuis le même FavoritesContext que FeedScreen.
- * Les deux écrans sont ainsi SYNCHRONISÉS : un favori ajouté dans Feed
- * apparaît instantanément ici, sans aucune communication directe entre eux.
+ * Écran des favoris : affiche toutes les photos sauvegardées,
+ * qu'elles viennent de l'API ou de la galerie du téléphone.
+ *
+ * Nouveautés de cette étape :
+ *   - Bouton FAB "+" pour ajouter une photo depuis la galerie
+ *   - Les LocalPhoto s'affichent avec le badge "📱 Local"
+ *   - Suppression distincte selon le type : toggleFavorite (API) ou removeLocalPhoto (local)
  *
  * Notions abordées :
- *   - Rendu conditionnel : liste ou état vide
- *   - Même hook, même Context → état partagé en temps réel
- *   - ScrollView pour une liste verticale
+ *   - useImagePicker() : accès à la galerie avec gestion des permissions
+ *   - Type guard isLocalPhoto() : différencier deux types dans un union
+ *   - Composant FAB en position absolute au-dessus du contenu
  */
 
 import React from 'react';
@@ -20,80 +23,105 @@ import {
   Alert,
   StyleSheet,
 } from 'react-native';
-import { FavoriteItem } from '../types';
+import { FavoriteItem, isLocalPhoto } from '../types';
 import { SectionHeader } from '../components/SectionHeader';
 import { EmptyState } from '../components/EmptyState';
 import { Badge } from '../components/Badge';
 import { PhotoCard } from '../components/PhotoCard';
+import { AddPhotoButton } from '../components/AddPhotoButton';
 import { useFavorites } from '../hooks/useFavorites';
+import { useImagePicker } from '../hooks/useImagePicker';
 
 export function FavoritesScreen() {
-  /*
-   * useFavorites() lit depuis le MÊME contexte que FeedScreen.
-   * Quand l'utilisateur ajoute un favori dans Feed, favorites se met
-   * à jour ici automatiquement — c'est la magie du Context partagé.
-   */
-  const { favorites, isFavorite, toggleFavorite } = useFavorites();
+  const { favorites, isFavorite, toggleFavorite, addLocalPhoto, removeLocalPhoto } =
+    useFavorites();
 
-  // Retrait d'un favori depuis cet écran
+  const { pickImage, isLoading } = useImagePicker();
+
+  // Retire un favori — la logique dépend du type de photo
   const handleRemoveFavorite = (item: FavoriteItem) => {
-    toggleFavorite(item);
-    // Pas d'Alert ici : la disparition de la carte est le feedback visuel
+    if (isLocalPhoto(item)) {
+      /*
+       * LocalPhoto : on appelle removeLocalPhoto avec l'id string.
+       * toggleFavorite ne fonctionne pas ici car LocalPhoto ≠ Photo API.
+       */
+      removeLocalPhoto(item.id);
+    } else {
+      /*
+       * Photo API : toggleFavorite gère l'ajout ET le retrait.
+       * Ici l'item est forcément en favori (on est dans FavoritesScreen),
+       * donc toggleFavorite va le retirer.
+       */
+      toggleFavorite(item);
+    }
+  };
+
+  // Tap sur le FAB "+" : ouvre la galerie et ajoute la photo sélectionnée
+  const handleAddPhoto = async () => {
+    const uri = await pickImage();
+
+    if (uri) {
+      // pickImage() a retourné une URI → on ajoute la photo aux favoris
+      addLocalPhoto(uri);
+      // Pas d'Alert : l'apparition de la carte dans la liste est le feedback
+    }
+    // Si uri est null : l'utilisateur a annulé ou la permission a été refusée
+    // (pickImage() a déjà affiché l'Alert dans ce cas)
+  };
+
+  // Détermine la source d'image à passer à PhotoCard selon le type de photo
+  const getImageSource = (item: FavoriteItem): string => {
+    if (isLocalPhoto(item)) {
+      return item.uri;          // chemin local sur l'appareil
+    }
+    return item.thumbnailUrl;   // miniature depuis l'API
   };
 
   // Sous-titre dynamique du SectionHeader
   const subtitle =
     favorites.length === 0
-      ? 'Aucun favori pour l\'instant'
+      ? "Aucun favori pour l'instant"
       : `${favorites.length} photo${favorites.length > 1 ? 's' : ''} sauvegardée${favorites.length > 1 ? 's' : ''}`;
 
   return (
+    /*
+     * position: 'relative' (valeur par défaut) est important ici :
+     * le bouton AddPhotoButton utilise position:'absolute', et il se
+     * positionne par rapport au premier ancêtre avec position non-static.
+     * En React Native, toutes les View ont position:'relative' par défaut. ✓
+     */
     <View style={styles.screen}>
 
-      {/*
-        SectionHeader avec Badge comme rightElement.
-        favorites.length se met à jour en temps réel grâce au Context.
-      */}
       <SectionHeader
         title="Mes favoris"
         subtitle={subtitle}
         rightElement={<Badge count={favorites.length} />}
       />
 
-      {/*
-        Rendu conditionnel :
-        - Si la liste est vide → EmptyState guide l'utilisateur
-        - Sinon → liste scrollable des photos favorites
-      */}
       {favorites.length === 0 ? (
-        // État vide : aucun favori sauvegardé
         <EmptyState
-          icon="❤️"
+          icon="🖼️"
           title="Aucun favori pour l'instant"
-          subtitle={"Appuie sur le 🤍 d'une photo dans le feed\npour la sauvegarder ici."}
+          subtitle={"Appuie sur le 🤍 dans le feed\nou sur + pour ajouter une photo depuis ta galerie."}
         />
       ) : (
-        // Liste des favoris : une carte par ligne (layout vertical)
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.listContent}
         >
-          {/*
-            Note : on affiche une carte par ligne (pas de grille 2 colonnes).
-            Cela contraste avec FeedScreen et montre qu'un même composant
-            PhotoCard peut s'utiliser dans des layouts différents.
-          */}
           {favorites.map((item) => (
             <View key={item.id} style={styles.cardWrapper}>
               <PhotoCard
                 photo={item}
-                isFavorite={isFavorite(item.id)}  // toujours true ici, mais on reste cohérent
+                imageSource={getImageSource(item)}
+                isLocal={isLocalPhoto(item)}
+                isFavorite={isFavorite(item.id)}
                 onPress={() => Alert.alert('📷 Photo', item.title)}
                 onFavoritePress={() => handleRemoveFavorite(item)}
               />
-              {/* Affiche la date d'ajout en bas de chaque carte */}
               <Text style={styles.dateAdded}>
-                Ajouté le {new Date(item.dateAdded).toLocaleDateString('fr-FR', {
+                Ajouté le{' '}
+                {new Date(item.dateAdded).toLocaleDateString('fr-FR', {
                   day: 'numeric',
                   month: 'long',
                   year: 'numeric',
@@ -101,33 +129,39 @@ export function FavoritesScreen() {
               </Text>
             </View>
           ))}
+
+          {/* Espace en bas pour que le FAB ne cache pas la dernière carte */}
+          <View style={styles.fabSpacer} />
         </ScrollView>
       )}
+
+      {/*
+        AddPhotoButton est rendu EN DEHORS du ScrollView mais DANS la View principale.
+        Grâce à position:'absolute', il flotte par-dessus le contenu scrollable.
+        C'est le pattern standard pour un FAB en React Native.
+      */}
+      <AddPhotoButton onPress={handleAddPhoto} isLoading={isLoading} />
 
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  // Conteneur principal
   screen: {
     flex: 1,
     backgroundColor: '#f8f8f8',
   },
 
-  // Conteneur scrollable de la liste — colonne simple (pas de grille)
   listContent: {
     padding: 16,
-    paddingBottom: 32,
+    paddingBottom: 16,
     gap: 12,
   },
 
-  // Chaque élément favori : carte + date
   cardWrapper: {
     backgroundColor: '#ffffff',
     borderRadius: 12,
     overflow: 'hidden',
-    // Légère ombre pour délimiter les cartes
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.08,
@@ -135,12 +169,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
 
-  // Date d'ajout affichée sous l'image
   dateAdded: {
     fontSize: 11,
     color: '#9ca3af',
     paddingHorizontal: 10,
     paddingBottom: 8,
     fontStyle: 'italic',
+  },
+
+  // Espace en bas de la liste pour éviter que le FAB cache le dernier élément
+  fabSpacer: {
+    height: 80,
   },
 });

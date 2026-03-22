@@ -1,30 +1,37 @@
 /**
  * screens/FeedScreen.tsx
  *
- * Écran principal : affiche la grille de photos avec gestion d'état complète.
- * Cet écran NE GÈRE PLUS d'état directement — il délègue tout à des hooks :
- *   - usePhotos()    → photos, loading, error, reload
- *   - useFavorites() → favorites, isFavorite, toggleFavorite
+ * Écran principal : affiche la grille de 30 photos chargées depuis l'API.
+ * Tap sur une carte → navigation vers PhotoDetailScreen (Stack Navigator).
  *
- * C'est le principe de "séparation des responsabilités" :
- *   FeedScreen = affichage uniquement
- *   Hooks      = logique et état
+ * --- FlatList vs ScrollView : pourquoi ce changement ? ---
+ *
+ * ScrollView charge TOUS les éléments en mémoire dès le départ.
+ * Avec 30 photos c'est acceptable, mais avec 500 ou 5000, les performances
+ * s'effondrent : tout est rendu, tout occupe de la mémoire, même hors écran.
+ *
+ * FlatList est "virtualisée" : elle ne rend QUE les éléments visibles à l'écran
+ * (+ quelques au-dessus/en-dessous en réserve). Les éléments qui sortent
+ * de l'écran sont détruits et recréés à la volée. Résultat : mémoire constante
+ * quelle que soit la taille de la liste. C'est le composant recommandé
+ * pour toutes les listes de contenu dynamique en React Native.
  *
  * Notions abordées :
- *   - Rendu conditionnel selon l'état (loading / error / données)
- *   - Composition de hooks dans un écran
- *   - Passage de callbacks aux composants enfants
+ *   - FlatList avec numColumns={2} pour une grille 2 colonnes
+ *   - useNavigation() pour naviguer depuis un écran
+ *   - Composition de hooks : usePhotos + useFavorites
  */
 
 import React from 'react';
 import {
   View,
   Text,
-  ScrollView,
+  FlatList,
   Alert,
   Dimensions,
   StyleSheet,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Photo } from '../types';
 import { PhotoCard } from '../components/PhotoCard';
 import { SectionHeader } from '../components/SectionHeader';
@@ -32,47 +39,50 @@ import { Loader } from '../components/Loader';
 import { ErrorMessage } from '../components/ErrorMessage';
 import { usePhotos } from '../hooks/usePhotos';
 import { useFavorites } from '../hooks/useFavorites';
+import { FeedStackNavigationProp } from '../navigation/types';
 
-// --- Calcul de la largeur des cartes (identique à l'étape précédente) ---
+// --- Calcul de la largeur des cartes ---
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const HORIZONTAL_PADDING = 12;
 const CARD_GAP = 10;
+// Chaque carte prend flex:1 dans sa colonne — CARD_WIDTH est utilisé comme référence
+// pour les styles, mais avec FlatList numColumns la largeur est gérée par flex:1
 const CARD_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - CARD_GAP) / 2;
 
 export function FeedScreen() {
   /*
-   * usePhotos() fournit tout ce qui concerne les données photos :
-   *   photos  → tableau de photos (vide pendant loading)
-   *   loading → true pendant les 1500ms de simulation
-   *   error   → string si échec, null si ok
-   *   reload  → fonction pour relancer le chargement
+   * useNavigation() retourne l'objet navigation de React Navigation.
+   * On le type avec FeedStackNavigationProp<'FeedMain'> pour que TypeScript
+   * valide les appels à navigation.navigate() : noms d'écrans et params vérifiés.
    */
-  const { photos, loading, error, reload } = usePhotos();
+  const navigation = useNavigation<FeedStackNavigationProp<'FeedMain'>>();
 
-  /*
-   * useFavorites() lit depuis le FavoritesContext (partagé avec FavoritesScreen).
-   * Tout changement ici se reflète instantanément dans l'onglet Favoris
-   * ET dans le Badge de la barre de navigation.
-   */
+  const { photos, loading, error, reload } = usePhotos();
   const { favorites, isFavorite, toggleFavorite } = useFavorites();
 
+  // Tap sur le cœur : toggle favori + Alert si ajout
   const handleFavoritePress = (photo: Photo) => {
     const wasAlreadyFavorite = isFavorite(photo.id);
     toggleFavorite(photo);
-    // Feedback visuel sonore uniquement à l'ajout (pas au retrait)
     if (!wasAlreadyFavorite) {
-      Alert.alert('Favori ajouté !', `"${photo.title}" sauvegardé dans tes favoris ❤️`);
+      Alert.alert('Favori ajouté !', `"${photo.title}" sauvegardé ❤️`);
     }
   };
 
+  // Tap sur une carte : navigation vers le détail
   const handleCardPress = (photo: Photo) => {
-    Alert.alert('📷 Photo', photo.title);
+    /*
+     * navigation.navigate() empile PhotoDetailScreen sur FeedScreen.
+     * Le deuxième argument est l'objet params — TypeScript vérifie
+     * que { photoId: number } correspond à FeedStackParamList['PhotoDetail'].
+     */
+    navigation.navigate('PhotoDetail', { photoId: photo.id });
   };
 
   return (
     <View style={styles.screen}>
 
-      {/* Bandeau d'en-tête — toujours visible, même pendant le chargement */}
+      {/* Bandeau indigo — toujours visible, même pendant loading/error */}
       <View style={styles.headerBand}>
         <Text style={styles.headerTitle}>🖼️ GallerIA</Text>
         <Text style={styles.headerSubtitle}>
@@ -80,48 +90,56 @@ export function FeedScreen() {
         </Text>
       </View>
 
-      {/*
-        Rendu conditionnel — les 3 états possibles de l'écran :
-        1. loading=true  → Loader (spinner centré)
-        2. error≠null    → ErrorMessage (avec bouton Réessayer)
-        3. sinon         → grille de photos
-
-        C'est le pattern standard de gestion d'état asynchrone en React :
-        on teste loading en premier (priorité sur error et data).
-      */}
+      {/* Rendu conditionnel : loading → error → données */}
       {loading ? (
-        // État 1 : chargement en cours — Loader occupe tout l'espace restant
         <Loader />
       ) : error ? (
-        // État 2 : erreur — onRetry est connecté à reload() du hook
-        <ErrorMessage
-          message={error}
-          onRetry={reload}
-        />
+        <ErrorMessage message={error} onRetry={reload} />
       ) : (
-        // État 3 : données disponibles — affichage de la grille
-        <ScrollView
+        /*
+         * FlatList remplace ScrollView + flexWrap.
+         *
+         * Props clés :
+         *   data          → tableau de données (les photos)
+         *   numColumns    → nombre de colonnes (2 pour notre grille)
+         *   keyExtractor  → clé unique par item (indispensable pour les performances)
+         *   renderItem    → composant rendu pour chaque item
+         *   columnWrapperStyle → style appliqué à chaque LIGNE (gap + padding horizontal)
+         *   ItemSeparatorComponent → rendu entre chaque LIGNE (espace vertical)
+         *   ListHeaderComponent   → rendu UNE FOIS avant la liste (SectionHeader)
+         */
+        <FlatList
+          data={photos}
+          numColumns={2}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={({ item }) => (
+            /*
+             * Chaque item a flex:1 → prend 50% de la ligne automatiquement.
+             * Pas besoin de CARD_WIDTH ici : FlatList gère la répartition
+             * entre les colonnes via flexbox.
+             */
+            <View style={styles.cardWrapper}>
+              <PhotoCard
+                photo={item}
+                imageSource={item.thumbnailUrl}  // Photo API → miniature 150×150
+                isLocal={false}
+                isFavorite={isFavorite(item.id)}
+                onPress={() => handleCardPress(item)}
+                onFavoritePress={() => handleFavoritePress(item)}
+              />
+            </View>
+          )}
+          columnWrapperStyle={styles.row}
+          ItemSeparatorComponent={() => <View style={{ height: CARD_GAP }} />}
+          contentContainerStyle={styles.listContent}
+          ListHeaderComponent={
+            <SectionHeader
+              title="Découvrir"
+              subtitle={`${photos.length} photos depuis l'API`}
+            />
+          }
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
-        >
-          <SectionHeader
-            title="Découvrir"
-            subtitle="Photos du moment"
-          />
-
-          <View style={styles.grid}>
-            {photos.map((photo) => (
-              <View key={photo.id} style={styles.cardWrapper}>
-                <PhotoCard
-                  photo={photo}
-                  isFavorite={isFavorite(photo.id)}
-                  onPress={() => handleCardPress(photo)}
-                  onFavoritePress={() => handleFavoritePress(photo)}
-                />
-              </View>
-            ))}
-          </View>
-        </ScrollView>
+        />
       )}
 
     </View>
@@ -135,7 +153,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
 
-  // Bandeau coloré permanent en haut de l'écran
+  // Bandeau coloré en haut
   headerBand: {
     backgroundColor: '#6366f1',
     paddingHorizontal: 16,
@@ -150,28 +168,25 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Sous-titre dynamique : se met à jour dès que photos ou favorites changent
   headerSubtitle: {
     fontSize: 13,
     color: 'rgba(255, 255, 255, 0.75)',
     marginTop: 4,
   },
 
-  // Conteneur scrollable (colonne par défaut — laisse SectionHeader pleine largeur)
-  scrollContent: {
+  // Contenu scrollable de la FlatList
+  listContent: {
     paddingBottom: 32,
   },
 
-  // Grille 2 colonnes
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  // Style de chaque LIGNE de la grille (2 cartes côte à côte)
+  row: {
     paddingHorizontal: HORIZONTAL_PADDING,
     gap: CARD_GAP,
   },
 
-  // Wrapper d'une carte avec largeur calculée dynamiquement
+  // Chaque item prend 50% de la ligne (flex:1 sur 2 colonnes = 50%)
   cardWrapper: {
-    width: CARD_WIDTH,
+    flex: 1,
   },
 });

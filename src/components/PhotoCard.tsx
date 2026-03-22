@@ -2,10 +2,15 @@
  * components/PhotoCard.tsx
  *
  * Composant réutilisable qui affiche une photo sous forme de carte.
- * Un "composant" est un bloc d'interface indépendant que l'on peut utiliser
- * plusieurs fois dans différents écrans — ici, dans le Feed et dans les Favoris.
+ * Accepte maintenant 2 types de photos :
+ *   - Photo API (thumbnailUrl comme source d'image)
+ *   - LocalPhoto (uri local comme source d'image)
  *
- * Notions abordées : View, Image, Text, TouchableOpacity, StyleSheet, position absolute
+ * La prop "imageSource" découple la source de l'image du type de photo,
+ * ce qui rend le composant utilisable dans les deux contextes.
+ *
+ * Notions abordées : View, Image, Text, TouchableOpacity, StyleSheet,
+ * position absolute, badge conditionnel, union de types TypeScript
  */
 
 import React from 'react';
@@ -16,38 +21,67 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { Photo } from '../types';
+import { Photo, LocalPhoto } from '../types';
 
-// Définition des props (paramètres) que le composant accepte
 type Props = {
-  photo: Photo;
+  /** La photo à afficher — peut être une Photo API ou une LocalPhoto */
+  photo: Photo | LocalPhoto;
+
+  /**
+   * Source de l'image à afficher dans la carte.
+   * Pour une Photo API : passer photo.thumbnailUrl
+   * Pour une LocalPhoto : passer photo.uri
+   * Ce champ est explicite pour ne pas avoir de logique de détection dans le composant.
+   */
+  imageSource: string;
+
+  /** Si true, affiche un badge "📱 Local" pour distinguer les photos locales */
+  isLocal?: boolean;
+
+  /** true si cette photo est dans la liste des favoris */
   isFavorite: boolean;
-  onPress: () => void;          // appelée quand l'utilisateur tape sur la carte
-  onFavoritePress: () => void;  // appelée quand l'utilisateur tape sur le cœur
+
+  /** Appelée quand l'utilisateur tape sur la carte */
+  onPress: () => void;
+
+  /** Appelée quand l'utilisateur tape sur le cœur */
+  onFavoritePress: () => void;
 };
 
-export function PhotoCard({ photo, isFavorite, onPress, onFavoritePress }: Props) {
+export function PhotoCard({
+  photo,
+  imageSource,
+  isLocal = false,
+  isFavorite,
+  onPress,
+  onFavoritePress,
+}: Props) {
   return (
-    // TouchableOpacity rend toute la carte cliquable et ajoute un effet de transparence au tap
     <TouchableOpacity style={styles.card} onPress={onPress} activeOpacity={0.85}>
 
-      {/* Image miniature de la photo — aspectRatio:1 la force en carré */}
+      {/* Image — source fournie explicitement en prop pour supporter les deux types */}
       <Image
-        source={{ uri: photo.thumbnailUrl }}
+        source={{ uri: imageSource }}
         style={styles.image}
         resizeMode="cover"
       />
 
-      {/* Titre de la photo, tronqué à 2 lignes si trop long */}
+      {/*
+        Badge "📱 Local" — affiché uniquement pour les photos venant de la galerie.
+        Positionné en absolu en haut à GAUCHE (le cœur est à droite).
+      */}
+      {isLocal && (
+        <View style={styles.localBadge}>
+          <Text style={styles.localBadgeText}>📱 Local</Text>
+        </View>
+      )}
+
+      {/* Titre tronqué à 2 lignes */}
       <Text style={styles.title} numberOfLines={2}>
         {photo.title}
       </Text>
 
-      {/*
-        Bouton favori positionné en absolu en haut à droite de la carte.
-        "position: 'absolute'" extrait l'élément du flux normal et permet
-        de le placer précisément par rapport à son parent.
-      */}
+      {/* Bouton cœur positionné en absolu en haut à droite */}
       <TouchableOpacity
         style={styles.favoriteButton}
         onPress={onFavoritePress}
@@ -67,21 +101,19 @@ const styles = StyleSheet.create({
   card: {
     backgroundColor: '#ffffff',
     borderRadius: 12,
-    overflow: 'hidden',      // masque ce qui dépasse les coins arrondis (image)
-    // Ombre sur iOS
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.12,
     shadowRadius: 6,
-    // Ombre sur Android
     elevation: 3,
   },
 
   // Image carrée qui prend toute la largeur de la carte
   image: {
     width: '100%',
-    aspectRatio: 1,           // hauteur = largeur → image toujours carrée
-    backgroundColor: '#f0f0f0', // fond gris pendant le chargement de l'image
+    aspectRatio: 1,
+    backgroundColor: '#f0f0f0',
   },
 
   // Titre en bas de la carte
@@ -93,17 +125,33 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
 
+  // Badge "📱 Local" en haut à gauche — positionné en absolu
+  localBadge: {
+    position: 'absolute',
+    top: 6,
+    left: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+
+  localBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+
   // Bouton cœur positionné en absolu en haut à droite
   favoriteButton: {
     position: 'absolute',
     top: 6,
     right: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)', // fond semi-transparent pour la lisibilité
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
     borderRadius: 20,
     padding: 4,
   },
 
-  // Taille de l'icône cœur
   favoriteIcon: {
     fontSize: 16,
   },

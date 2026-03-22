@@ -1,27 +1,22 @@
 /**
  * context/FavoritesContext.tsx
  *
- * Ce fichier implémente le CONTEXTE React pour les favoris.
+ * Contexte React qui gère les favoris de l'application.
+ * Dans cette version, le Context accepte 2 types de photos :
+ *   - Photo API (toggleFavorite) : photos chargées depuis JSONPlaceholder
+ *   - LocalPhoto (addLocalPhoto) : photos ajoutées depuis la galerie du téléphone
  *
- * --- Pourquoi un Context ? ---
- * Le problème : FeedScreen et FavoritesScreen ont besoin du MÊME état "favoris",
- * et AppNavigator doit aussi connaître le nombre de favoris pour le Badge.
- * Ces 3 composants ne sont pas dans une relation parent-enfant directe,
- * donc passer l'état par des props serait lourd ("prop drilling").
- *
- * La solution : React Context crée une "boutique" globale accessible
- * par n'importe quel composant enveloppé dans <FavoritesProvider>.
- * C'est l'alternative légère à Redux pour des apps de taille modeste.
- *
- * --- Comment ça marche ---
- * 1. createContext() crée le "conteneur" vide
- * 2. FavoritesProvider stocke l'état et le rend disponible
- * 3. useFavoritesContext() permet à n'importe quel enfant de le lire
+ * Arbre de composants :
+ *   <FavoritesProvider>      ← fournit le contexte
+ *     <AppNavigator>         ← lit favorites.length pour le Badge
+ *       <FeedScreen>         ← toggleFavorite pour les photos API
+ *       <FavoritesScreen>    ← addLocalPhoto + removeLocalPhoto + liste
+ *       <PhotoDetailScreen>  ← toggleFavorite pour le bouton "❤️ Ajouter"
  *
  * Notions abordées :
  *   - createContext, useContext (API Context de React)
- *   - Provider pattern
- *   - useCallback pour mémoriser les fonctions
+ *   - Union de types TypeScript dans un tableau d'état
+ *   - useCallback pour mémoriser les fonctions et éviter les re-renders
  */
 
 import React, {
@@ -31,82 +26,110 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
-import { Photo, FavoriteItem } from '../types';
+import { Photo, LocalPhoto, FavoriteItem } from '../types';
 
-// --- Type du contexte : ce que le Provider met à disposition ---
+// --- Type du contexte : tout ce que le Provider met à disposition ---
 type FavoritesContextType = {
-  favorites: FavoriteItem[];                  // liste des photos favorites
-  isFavorite: (id: number) => boolean;        // teste si une photo est en favori
-  toggleFavorite: (photo: Photo) => void;     // ajoute ou retire une photo des favoris
+  /** Tableau des favoris : Photo API ou LocalPhoto */
+  favorites: FavoriteItem[];
+
+  /** Retourne true si la photo (identifiée par son id) est en favori */
+  isFavorite: (id: number | string) => boolean;
+
+  /** Ajoute ou retire une photo API des favoris (inchangé par rapport à l'étape précédente) */
+  toggleFavorite: (photo: Photo) => void;
+
+  /** Ajoute une photo locale (depuis la galerie) directement dans les favoris */
+  addLocalPhoto: (uri: string) => void;
+
+  /** Retire une photo locale des favoris à partir de son id string */
+  removeLocalPhoto: (id: string) => void;
 };
 
-// createContext() crée le contexte avec une valeur initiale null.
-// Le "!" dans useFavoritesContext() garantit qu'on l'utilise toujours dans un Provider.
 const FavoritesContext = createContext<FavoritesContextType | null>(null);
 
-// --- Provider : le composant qui enveloppe l'app et partage l'état ---
 type ProviderProps = { children: ReactNode };
 
 export function FavoritesProvider({ children }: ProviderProps) {
   /*
-   * useState<FavoriteItem[]>([]) — stocke la liste des favoris.
-   * Séparé des autres états car c'est LA donnée centrale de ce contexte :
-   * tous les autres calculs (isFavorite, toggleFavorite) en dépendent.
+   * favorites stocke un mélange de Photo API et de LocalPhoto.
+   * Le type FavoriteItem = (Photo & { dateAdded }) | LocalPhoto
+   * permet à TypeScript de vérifier que les deux sont bien gérés.
    */
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
 
   /*
-   * useCallback mémorise isFavorite entre les renders.
-   *
-   * POURQUOI useCallback ici ?
-   * Sans useCallback, isFavorite serait une NOUVELLE fonction à chaque render
-   * du Provider, ce qui forcerait tous les composants consommateurs à
-   * se re-render, même si favorites n'a pas changé.
-   * Avec useCallback([favorites]), la fonction n'est recréée que quand
-   * favorites change — ce qui est le seul cas où le résultat peut changer.
+   * isFavorite — accepte maintenant number | string car :
+   *   - Photo API → id: number
+   *   - LocalPhoto → id: string
+   * La comparaison f.id === id fonctionne dans les deux cas.
    */
   const isFavorite = useCallback(
-    (id: number): boolean => favorites.some((f) => f.id === id),
-    [favorites] // recalcule seulement quand la liste change
+    (id: number | string): boolean => favorites.some((f) => f.id === id),
+    [favorites]
   );
 
   /*
-   * useCallback mémorise toggleFavorite entre les renders.
-   *
-   * POURQUOI useCallback avec [] (dépendances vides) ?
-   * toggleFavorite utilise la forme fonctionnelle de setFavorites : (prev) => ...
-   * Cela lui permet d'accéder à l'état le plus récent SANS avoir
-   * favorites dans ses dépendances. La fonction est donc stable pour
-   * toute la durée de vie du composant → pas de re-renders inutiles.
+   * toggleFavorite — INCHANGÉ pour les Photos API.
+   * Ajoute (avec dateAdded) ou retire une Photo API des favoris.
    */
   const toggleFavorite = useCallback((photo: Photo): void => {
     setFavorites((prev) => {
       const exists = prev.some((f) => f.id === photo.id);
       if (exists) {
-        // Retire la photo : filtre = nouveau tableau sans cet élément
         return prev.filter((f) => f.id !== photo.id);
-      } else {
-        // Ajoute la photo : on enrichit Photo avec la date d'ajout → FavoriteItem
-        const newFavorite: FavoriteItem = {
-          ...photo,
-          dateAdded: new Date().toISOString(), // date ISO : "2024-03-22T14:30:00.000Z"
-        };
-        return [...prev, newFavorite];
       }
+      return [...prev, { ...photo, dateAdded: new Date().toISOString() }];
     });
-  }, []); // pas de dépendances : setFavorites est stable, et on utilise prev
+  }, []);
+
+  /*
+   * addLocalPhoto — NOUVEAU.
+   * Crée un objet LocalPhoto à partir d'une URI locale et l'ajoute aux favoris.
+   * Le titre est généré automatiquement avec la date du jour en français.
+   */
+  const addLocalPhoto = useCallback((uri: string): void => {
+    const now = new Date();
+
+    // Titre lisible : "Ma photo — 22 mars 2024"
+    const dateStr = now.toLocaleDateString('fr-FR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    });
+
+    const newLocal: LocalPhoto = {
+      id: Date.now().toString(), // identifiant unique basé sur le timestamp
+      uri,
+      title: `Ma photo — ${dateStr}`,
+      isLocal: true,
+      dateAdded: now.toISOString(),
+    };
+
+    setFavorites((prev) => [...prev, newLocal]);
+  }, []);
+
+  /*
+   * removeLocalPhoto — NOUVEAU.
+   * Retire une LocalPhoto des favoris à partir de son id (string).
+   * Séparé de toggleFavorite car les LocalPhoto n'ont pas de "toggle" :
+   * on ne peut qu'ajouter (via addLocalPhoto) ou retirer.
+   */
+  const removeLocalPhoto = useCallback((id: string): void => {
+    setFavorites((prev) => prev.filter((f) => f.id !== id));
+  }, []);
 
   return (
-    <FavoritesContext.Provider value={{ favorites, isFavorite, toggleFavorite }}>
+    <FavoritesContext.Provider
+      value={{ favorites, isFavorite, toggleFavorite, addLocalPhoto, removeLocalPhoto }}
+    >
       {children}
     </FavoritesContext.Provider>
   );
 }
 
-// --- Hook utilitaire pour consommer le contexte facilement ---
 export function useFavoritesContext(): FavoritesContextType {
   const ctx = useContext(FavoritesContext);
-  // Garde-fou : si on appelle ce hook hors du Provider, on obtient une erreur claire
   if (!ctx) {
     throw new Error('useFavoritesContext doit être utilisé dans un <FavoritesProvider>');
   }

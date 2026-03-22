@@ -15,13 +15,8 @@ export type Photo = {
   thumbnailUrl: string;
 };
 
-// Représente une photo ajoutée manuellement depuis la galerie du téléphone
-export type LocalPhoto = {
-  id: string; // identifiant unique généré localement (ex: timestamp)
-  uri: string; // chemin local de l'image sur le téléphone
-  title: string;
-  isLocal: true; // permet de distinguer les photos locales des photos API
+// Représente un favori : une photo enrichie de la date à laquelle elle a été ajoutée
+// L'opérateur "&" signifie "Photo + les champs supplémentaires ci-dessous"
+export type FavoriteItem = Photo & {
+  dateAdded: string; // date ISO (ex: "2024-03-22T14:30:00.000Z") générée au moment de l'ajout
 };
-
-// Un favori peut être une photo API ou une photo locale
-export type FavoriteItem = Photo | LocalPhoto;

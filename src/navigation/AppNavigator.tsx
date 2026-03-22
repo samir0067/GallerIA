@@ -11,8 +11,10 @@
  *       │   └── Stack.Navigator  ← navigation "pile" dans l'onglet Feed
  *       │       ├── FeedScreen           (écran principal)
  *       │       └── PhotoDetailScreen    (écran de détail, accessible via navigate())
- *       └── Tab "Favoris"
- *           └── FavoritesScreen  ← écran simple, pas de sous-navigation
+ *       ├── Tab "Favoris"
+ *       │   └── FavoritesScreen  ← écran simple, pas de sous-navigation
+ *       └── Tab "Paramètres"
+ *           └── SettingsScreen   ← paramètres et préférences
  *
  * --- Pourquoi imbriquer Stack dans Tab ? ---
  * L'onglet Feed a besoin d'une navigation "profonde" : FeedScreen → PhotoDetailScreen.
@@ -37,6 +39,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { FeedScreen } from '../screens/FeedScreen';
 import { PhotoDetailScreen } from '../screens/PhotoDetailScreen';
 import { FavoritesScreen } from '../screens/FavoritesScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { Badge } from '../components/Badge';
 import { useFavoritesContext } from '../context/FavoritesContext';
 import { FeedStackParamList } from './types';
@@ -135,6 +138,28 @@ export function AppNavigator() {
                   </View>
                 )}
               </View>
+            ),
+          }}
+        />
+
+        {/*
+         * Onglet Paramètres → SettingsScreen
+         *
+         * headerShown: true avec le même style indigo pour la cohérence visuelle.
+         * Pas de Stack imbriqué ici : SettingsScreen n'a pas de navigation profonde.
+         */}
+        <Tab.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{
+            title: 'Paramètres',
+            headerStyle: { backgroundColor: '#6366f1' },
+            headerTintColor: '#fff',
+            headerTitleStyle: { fontWeight: 'bold' },
+            headerShown: true,
+            tabBarLabel: 'Paramètres',
+            tabBarIcon: ({ color }) => (
+              <Text style={{ color, fontSize: 20 }}>⚙️</Text>
             ),
           }}
         />

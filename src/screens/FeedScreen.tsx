@@ -16,17 +16,36 @@
  * quelle que soit la taille de la liste. C'est le composant recommandé
  * pour toutes les listes de contenu dynamique en React Native.
  *
+ * --- Header animé (collapsible) ---
+ *
+ * Le bandeau du haut rétrécit quand l'utilisateur scrolle vers le bas.
+ * Effet : plus de place pour le contenu, header discret pendant la navigation.
+ *
+ * Mécanique :
+ *   1. scrollY — Animated.Value qui suit la position de scroll
+ *   2. Animated.event() — connecte l'événement onScroll à scrollY automatiquement
+ *   3. scrollY.interpolate() — mappe une plage de scroll (0-80px) vers une plage de style
+ *   4. Animated.View avec les styles interpolés → React Native applique la transformation
+ *
+ * useNativeDriver: false est obligatoire ici car on anime des propriétés de LAYOUT
+ * (height, paddingTop, fontSize). Le driver natif ne supporte que les transformations
+ * (translate, scale, opacity) qui ne modifient pas le layout.
+ *
  * Notions abordées :
  *   - FlatList avec numColumns={2} pour une grille 2 colonnes
  *   - useNavigation() pour naviguer depuis un écran
  *   - Composition de hooks : usePhotos + useFavorites
+ *   - Animated.Value + useRef pour suivre le scroll
+ *   - Animated.event() : pont entre événement natif et Animated.Value
+ *   - interpolate() : mapping de plages de valeurs
+ *   - useNativeDriver: false pour les animations de layout
  */
 
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
-  FlatList,
+  Animated,
   Alert,
   Dimensions,
   StyleSheet,
@@ -49,6 +68,11 @@ const CARD_GAP = 10;
 // pour les styles, mais avec FlatList numColumns la largeur est gérée par flex:1
 const CARD_WIDTH = (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - CARD_GAP) / 2;
 
+// --- Constantes pour l'animation du header ---
+// Ces valeurs définissent le COMPORTEMENT de l'animation
+const HEADER_MAX_HEIGHT = 80;   // hauteur initiale du bandeau
+const HEADER_MIN_HEIGHT = 50;   // hauteur minimale après scroll
+
 export function FeedScreen() {
   /*
    * useNavigation() retourne l'objet navigation de React Navigation.
@@ -59,6 +83,58 @@ export function FeedScreen() {
 
   const { photos, loading, error, reload } = usePhotos();
   const { favorites, isFavorite, toggleFavorite } = useFavorites();
+
+  // ─── Animation du header ────────────────────────────────────────────────────
+
+  /*
+   * scrollY — Animated.Value qui reflète la position de scroll de la FlatList.
+   *
+   * useRef() : la valeur animée persiste entre les re-renders sans en déclencher.
+   * .current : pattern standard pour accéder à la valeur du ref.
+   *
+   * new Animated.Value(0) : position de scroll initiale = 0 (haut de la liste).
+   */
+  const scrollY = useRef(new Animated.Value(0)).current;
+
+  /*
+   * headerHeight — interpolation de scrollY vers une hauteur de header.
+   *
+   * interpolate({ inputRange, outputRange }) :
+   *   - inputRange: [0, 80] → quand scrollY vaut entre 0 et 80
+   *   - outputRange: [80, 50] → la hauteur passe de 80 à 50
+   *   - extrapolate: 'clamp' → bloque les valeurs aux bornes (ne va pas < 50 ou > 80)
+   *
+   * Quand scrollY = 0   → height = 80 (header pleine taille)
+   * Quand scrollY = 40  → height = 65 (mi-animation)
+   * Quand scrollY ≥ 80  → height = 50 (header compact — bloqué par clamp)
+   */
+  const headerHeight = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT],
+    outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
+    extrapolate: 'clamp',
+  });
+
+  /*
+   * titleFontSize — interpolation de scrollY vers une taille de texte.
+   * Même logique que headerHeight : le titre rétrécit de 26px à 18px.
+   */
+  const titleFontSize = scrollY.interpolate({
+    inputRange: [0, HEADER_MAX_HEIGHT],
+    outputRange: [26, 18],
+    extrapolate: 'clamp',
+  });
+
+  /*
+   * titleOpacity — le sous-titre disparaît pendant le scroll.
+   * Disparaît entre scroll 0 et 40 (deux fois plus rapide que le header).
+   */
+  const subtitleOpacity = scrollY.interpolate({
+    inputRange: [0, 40],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+
+  // ─── Handlers ───────────────────────────────────────────────────────────────
 
   // Tap sur le cœur : toggle favori + Alert si ajout
   const handleFavoritePress = (photo: Photo) => {
@@ -82,13 +158,33 @@ export function FeedScreen() {
   return (
     <View style={styles.screen}>
 
-      {/* Bandeau indigo — toujours visible, même pendant loading/error */}
-      <View style={styles.headerBand}>
-        <Text style={styles.headerTitle}>🖼️ GallerIA</Text>
-        <Text style={styles.headerSubtitle}>
+      {/*
+        Animated.View — version animable de View.
+        Le style accepte des Animated.Value (interpolées ou non).
+        Ici : height et paddingTop sont des valeurs interpolées depuis scrollY.
+
+        IMPORTANT : useNativeDriver: false est requis pour les animations de layout.
+        Les propriétés comme height, padding, fontSize ne peuvent pas être
+        animées sur le thread natif — elles nécessitent le bridge JS/natif.
+      */}
+      <Animated.View
+        style={[
+          styles.headerBand,
+          {
+            height: headerHeight,
+          },
+        ]}
+      >
+        {/* Titre animé — fontSize change avec le scroll */}
+        <Animated.Text style={[styles.headerTitle, { fontSize: titleFontSize }]}>
+          🖼️ GallerIA
+        </Animated.Text>
+
+        {/* Sous-titre — disparaît pendant le scroll */}
+        <Animated.Text style={[styles.headerSubtitle, { opacity: subtitleOpacity }]}>
           {photos.length} photo{photos.length !== 1 ? 's' : ''} · {favorites.length} favori{favorites.length !== 1 ? 's' : ''}
-        </Text>
-      </View>
+        </Animated.Text>
+      </Animated.View>
 
       {/* Rendu conditionnel : loading → error → données */}
       {loading ? (
@@ -97,18 +193,21 @@ export function FeedScreen() {
         <ErrorMessage message={error} onRetry={reload} />
       ) : (
         /*
-         * FlatList remplace ScrollView + flexWrap.
+         * Animated.FlatList — version animable de FlatList.
+         * Permet d'utiliser onScroll avec Animated.event().
          *
-         * Props clés :
-         *   data          → tableau de données (les photos)
-         *   numColumns    → nombre de colonnes (2 pour notre grille)
-         *   keyExtractor  → clé unique par item (indispensable pour les performances)
-         *   renderItem    → composant rendu pour chaque item
-         *   columnWrapperStyle → style appliqué à chaque LIGNE (gap + padding horizontal)
-         *   ItemSeparatorComponent → rendu entre chaque LIGNE (espace vertical)
-         *   ListHeaderComponent   → rendu UNE FOIS avant la liste (SectionHeader)
+         * onScroll={Animated.event([...])}
+         * Animated.event() crée un handler qui met à jour scrollY automatiquement
+         * à chaque événement de scroll natif — sans passer par setState.
+         *
+         * La structure [{ nativeEvent: { contentOffset: { y: scrollY } } }]
+         * mappe la propriété nativeEvent.contentOffset.y de l'événement scroll
+         * vers la valeur animée scrollY.
+         *
+         * scrollEventThrottle={16} : émet l'événement scroll au maximum toutes les 16ms
+         * (~60 fps). Sans ça, l'animation serait saccadée sur iOS.
          */
-        <FlatList
+        <Animated.FlatList
           data={photos}
           numColumns={2}
           keyExtractor={(item) => item.id.toString()}
@@ -139,6 +238,13 @@ export function FeedScreen() {
             />
           }
           showsVerticalScrollIndicator={false}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: false }
+            //                   ^^^^^ obligatoire pour les animations de layout (height, fontSize)
+            //                   true serait possible si on animait uniquement opacity/transform
+          )}
+          scrollEventThrottle={16}
         />
       )}
 
@@ -153,16 +259,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
   },
 
-  // Bandeau coloré en haut
+  // Bandeau coloré en haut — hauteur contrôlée par l'animation
   headerBand: {
     backgroundColor: '#6366f1',
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 20,
+    paddingBottom: 8,
+    overflow: 'hidden', // masque le contenu qui dépasse quand le header rétrécit
+    justifyContent: 'center',
   },
 
   headerTitle: {
-    fontSize: 26,
+    // fontSize est animé — on ne le définit PAS ici pour éviter le conflit
     fontWeight: '800',
     color: '#ffffff',
     letterSpacing: 0.5,
@@ -171,7 +279,7 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     fontSize: 13,
     color: 'rgba(255, 255, 255, 0.75)',
-    marginTop: 4,
+    marginTop: 2,
   },
 
   // Contenu scrollable de la FlatList

@@ -4,23 +4,34 @@
  * Écran des favoris : affiche toutes les photos sauvegardées,
  * qu'elles viennent de l'API ou de la galerie du téléphone.
  *
- * Nouveautés de cette étape :
- *   - Bouton FAB "+" pour ajouter une photo depuis la galerie
- *   - Les LocalPhoto s'affichent avec le badge "📱 Local"
- *   - Suppression distincte selon le type : toggleFavorite (API) ou removeLocalPhoto (local)
+ * --- Animation d'apparition des items ---
+ *
+ * Chaque item de la liste entre en scène avec une animation combinée :
+ *   - fade : opacité 0 → 1
+ *   - slide : translateY 20 → 0 (remonte légèrement depuis le bas)
+ *
+ * Cette animation est encapsulée dans un composant AnimatedFavoriteItem.
+ * À son montage, il démarre l'animation automatiquement via useEffect [].
+ *
+ * Animated.parallel() lance plusieurs animations en même temps.
+ * C'est la façon idiomatic de combiner des effets dans React Native.
  *
  * Notions abordées :
  *   - useImagePicker() : accès à la galerie avec gestion des permissions
  *   - Type guard isLocalPhoto() : différencier deux types dans un union
  *   - Composant FAB en position absolute au-dessus du contenu
+ *   - Animated.Value (opacité + translation)
+ *   - Animated.parallel : plusieurs animations simultanées
+ *   - Animated.timing : animation à durée fixe
  */
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   Alert,
+  Animated,
   StyleSheet,
 } from 'react-native';
 import { FavoriteItem, isLocalPhoto } from '../types';
@@ -31,6 +42,72 @@ import { PhotoCard } from '../components/PhotoCard';
 import { AddPhotoButton } from '../components/AddPhotoButton';
 import { useFavorites } from '../hooks/useFavorites';
 import { useImagePicker } from '../hooks/useImagePicker';
+
+// ─── Composant wrapper animé pour chaque item ─────────────────────────────────
+
+type AnimatedItemProps = {
+  children: React.ReactNode;
+};
+
+/**
+ * AnimatedFavoriteItem — enveloppe chaque carte de favori avec une animation
+ * d'entrée (fade + remontée depuis le bas).
+ *
+ * Pourquoi un composant séparé et non une animation dans le map() ?
+ * Chaque item a son PROPRE état d'animation (opacityAnim, translateYAnim).
+ * Si on mettait les Animated.Value dans FavoritesScreen, ils seraient partagés
+ * entre tous les items → tous animés en même temps au mauvais moment.
+ * Un composant séparé = une instance isolée de chaque Animated.Value. ✓
+ */
+function AnimatedFavoriteItem({ children }: AnimatedItemProps) {
+  /*
+   * opacityAnim — contrôle l'opacité de 0 (invisible) à 1 (opaque).
+   * translateYAnim — contrôle la position verticale : 20px en dessous → 0 (place normale).
+   *
+   * useRef : comme dans PhotoCard, on évite useState pour ne pas déclencher
+   * de re-render à chaque frame d'animation.
+   */
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+  const translateYAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    /*
+     * Animated.parallel([...]) — lance toutes les animations en même temps.
+     * Alternatives :
+     *   Animated.sequence([...]) → les animations se jouent l'une après l'autre
+     *   Animated.stagger(delay, [...]) → comme parallel mais avec un décalage entre chaque
+     *
+     * On choisit parallel car on veut que fade ET slide commencent en même temps.
+     *
+     * .start() — déclenche l'animation. Sans start(), rien ne se passe.
+     */
+    Animated.parallel([
+      Animated.timing(opacityAnim, {
+        toValue: 1,           // opacity: 0 → 1
+        duration: 350,        // 350ms — assez rapide pour ne pas sembler lent
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateYAnim, {
+        toValue: 0,           // translateY: 20 → 0 (remonte à sa position normale)
+        duration: 350,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []); // [] → s'exécute une seule fois au montage du composant
+
+  return (
+    <Animated.View
+      style={{
+        opacity: opacityAnim,
+        transform: [{ translateY: translateYAnim }],
+      }}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+// ─── Écran principal ──────────────────────────────────────────────────────────
 
 export function FavoritesScreen() {
   const { favorites, isFavorite, toggleFavorite, addLocalPhoto, removeLocalPhoto } =
@@ -63,7 +140,7 @@ export function FavoritesScreen() {
     if (uri) {
       // pickImage() a retourné une URI → on ajoute la photo aux favoris
       addLocalPhoto(uri);
-      // Pas d'Alert : l'apparition de la carte dans la liste est le feedback
+      // Pas d'Alert : l'apparition animée de la carte est le feedback
     }
     // Si uri est null : l'utilisateur a annulé ou la permission a été refusée
     // (pickImage() a déjà affiché l'Alert dans ce cas)
@@ -110,24 +187,35 @@ export function FavoritesScreen() {
           contentContainerStyle={styles.listContent}
         >
           {favorites.map((item) => (
-            <View key={item.id} style={styles.cardWrapper}>
-              <PhotoCard
-                photo={item}
-                imageSource={getImageSource(item)}
-                isLocal={isLocalPhoto(item)}
-                isFavorite={isFavorite(item.id)}
-                onPress={() => Alert.alert('📷 Photo', item.title)}
-                onFavoritePress={() => handleRemoveFavorite(item)}
-              />
-              <Text style={styles.dateAdded}>
-                Ajouté le{' '}
-                {new Date(item.dateAdded).toLocaleDateString('fr-FR', {
-                  day: 'numeric',
-                  month: 'long',
-                  year: 'numeric',
-                })}
-              </Text>
-            </View>
+            /*
+             * AnimatedFavoriteItem enveloppe chaque carte.
+             * La key est sur AnimatedFavoriteItem (pas sur la View intérieure)
+             * pour que React crée une nouvelle instance animée à chaque nouvel item.
+             *
+             * Quand un item est supprimé, React démonte l'AnimatedFavoriteItem correspondant.
+             * Quand un nouvel item est ajouté, un nouvel AnimatedFavoriteItem est monté
+             * → son useEffect [] se déclenche → animation d'entrée. ✓
+             */
+            <AnimatedFavoriteItem key={item.id}>
+              <View style={styles.cardWrapper}>
+                <PhotoCard
+                  photo={item}
+                  imageSource={getImageSource(item)}
+                  isLocal={isLocalPhoto(item)}
+                  isFavorite={isFavorite(item.id)}
+                  onPress={() => Alert.alert('📷 Photo', item.title)}
+                  onFavoritePress={() => handleRemoveFavorite(item)}
+                />
+                <Text style={styles.dateAdded}>
+                  Ajouté le{' '}
+                  {new Date(item.dateAdded).toLocaleDateString('fr-FR', {
+                    day: 'numeric',
+                    month: 'long',
+                    year: 'numeric',
+                  })}
+                </Text>
+              </View>
+            </AnimatedFavoriteItem>
           ))}
 
           {/* Espace en bas pour que le FAB ne cache pas la dernière carte */}

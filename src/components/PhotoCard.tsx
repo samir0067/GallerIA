@@ -38,13 +38,13 @@ import React, { useRef } from 'react';
 import {
   View,
   Text,
-  Image,
   TouchableOpacity,
   Pressable,
   Animated,
   StyleSheet,
 } from 'react-native';
 import { Photo, LocalPhoto } from '../types';
+import { SkeletonImage } from './SkeletonImage';
 
 type Props = {
   /** La photo à afficher — peut être une Photo API ou une LocalPhoto */
@@ -145,12 +145,8 @@ export function PhotoCard({
        */}
       <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut}>
 
-        {/* Image — source fournie explicitement en prop pour supporter les deux types */}
-        <Image
-          source={{ uri: imageSource }}
-          style={styles.image}
-          resizeMode="cover"
-        />
+        {/* SkeletonImage — affiche le pulse pendant le chargement, puis l'image */}
+        <SkeletonImage uri={imageSource} style={styles.image} />
 
         {/*
           Badge "📱 Local" — affiché uniquement pour les photos venant de la galerie.

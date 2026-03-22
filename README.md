@@ -1,8 +1,41 @@
 # GallerIA 🖼️
 
-Application mobile pédagogique construite avec **React Native + Expo + TypeScript**.
+> **Pédagogique ✅** — Projet de démonstration pour l'initiation au développement mobile React Native
+
+Application mobile construite avec **React Native + Expo + TypeScript**.
 Conçue pour les étudiants de Bachelor 2 pour illustrer les concepts fondamentaux
-du développement mobile.
+du développement mobile, étape par étape.
+
+---
+
+## Documentation pédagogique
+
+| Document | Contenu |
+|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Arborescence, flux de données, schéma de navigation, rôle de chaque fichier |
+| [docs/CONCEPTS.md](docs/CONCEPTS.md) | 14 concepts React Native expliqués avec exemples tirés du projet |
+| [docs/GUIDE-FORMATEUR.md](docs/GUIDE-FORMATEUR.md) | Déroulé des 7 créneaux, questions à poser, points de blocage |
+| [docs/GLOSSAIRE.md](docs/GLOSSAIRE.md) | Définitions des termes techniques (JSX, hook, Context, interpolation...) |
+
+---
+
+## Comment lire ce code (ordre recommandé pour un étudiant)
+
+Si tu découvres le projet pour la première fois, suis cet ordre :
+
+1. **`src/types/index.ts`** — commence par les types de données (`Photo`, `LocalPhoto`, `FavoriteItem`). Comprendre les données avant le code.
+2. **`src/components/Loader.tsx`** — composant le plus simple : juste une View + ActivityIndicator. Idéal pour comprendre la structure d'un composant.
+3. **`src/components/Badge.tsx`** — composant avec props typées et valeur par défaut.
+4. **`src/components/PhotoCard.tsx`** — composant plus complet avec plusieurs props, image, et animation.
+5. **`src/services/api.ts`** — comment faire un appel API (`fetch`, `async/await`, gestion d'erreurs).
+6. **`src/hooks/usePhotos.ts`** — hook personnalisé : `useState` + `useEffect` + `useCallback`.
+7. **`src/context/FavoritesContext.tsx`** — état partagé + persistance AsyncStorage. Le fichier le plus dense, lire après les hooks.
+8. **`src/screens/FeedScreen.tsx`** — premier écran complet : combine hooks, navigation, FlatList et animation.
+9. **`src/screens/SettingsScreen.tsx`** — écran le plus simple à lire après avoir compris les bases.
+10. **`src/navigation/AppNavigator.tsx`** — architecture de navigation complète (Tab + Stack).
+
+> 💡 Chaque fichier contient des commentaires pédagogiques détaillés.
+> Lis les commentaires en parallèle du code — ils expliquent le **pourquoi**, pas seulement le **quoi**.
 
 ---
 
@@ -131,6 +164,9 @@ src/
 
 ---
 
-## Auteur
+## Crédits
 
-Projet pédagogique — Bachelor 2 React Native
+- **Formateur :** Samir
+- **Établissement :** YNOV Campus Strasbourg
+- **Formation :** Bachelor 2 Informatique — Introduction au développement mobile
+- **Année :** 2025–2026

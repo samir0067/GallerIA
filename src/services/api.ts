@@ -15,6 +15,40 @@ import { Photo } from '../types';
 /** URL de base de l'API — modifiable en un seul endroit si l'API change */
 const BASE_URL = 'https://jsonplaceholder.typicode.com';
 
+// ---------------------------------------------------------------------------
+// Remplacement des URLs d'images par Picsum Photos
+// ---------------------------------------------------------------------------
+
+/**
+ * Transforme les URLs d'images d'une photo JSONPlaceholder en URLs Picsum Photos.
+ * JSONPlaceholder retourne des carrés gris unis (via.placeholder.com) — peu utile
+ * pour une démo visuelle. Picsum Photos fournit de vraies photographies.
+ *
+ * --- Notion pédagogique : seed et déterminisme ---
+ *
+ * Un "seed" (littéralement "graine") est une valeur d'entrée qui initialise
+ * un processus de sélection. L'API Picsum l'utilise pour choisir TOUJOURS
+ * la même photo pour un seed donné :
+ *
+ *   picsum.photos/seed/42/150/150  →  retourne TOUJOURS la même image
+ *   picsum.photos/150/150          →  retourne une image DIFFÉRENTE à chaque appel
+ *
+ * C'est le principe du DÉTERMINISME : à entrée identique, sortie identique.
+ * En utilisant l'id de la photo comme seed, on garantit que la photo #42
+ * affiche toujours la même image Picsum, peu importe quand l'app est chargée. ✓
+ *
+ * Format des URLs :
+ *   Miniature  : https://picsum.photos/seed/{id}/150/150
+ *   Grande image : https://picsum.photos/seed/{id}/600/600
+ */
+function withPicsumUrls(photo: Photo): Photo {
+  return {
+    ...photo,
+    thumbnailUrl: `https://picsum.photos/seed/${photo.id}/150/150`,
+    url: `https://picsum.photos/seed/${photo.id}/600/600`,
+  };
+}
+
 /**
  * Récupère une liste de photos depuis l'API JSONPlaceholder.
  *
@@ -38,7 +72,8 @@ export async function fetchPhotos(limit: number = 30): Promise<Photo[]> {
 
     // response.json() désérialise le corps JSON de la réponse
     const data: Photo[] = await response.json();
-    return data;
+    // On remplace les URLs via.placeholder.com par de vraies photos Picsum
+    return data.map(withPicsumUrls);
   } catch (err) {
     // On attrape les erreurs réseau (pas de connexion) ET les erreurs HTTP
     // Si c'est déjà une Error avec notre message, on la relance telle quelle
@@ -73,7 +108,8 @@ export async function fetchPhotoById(id: number): Promise<Photo> {
     }
 
     const data: Photo = await response.json();
-    return data;
+    // On remplace les URLs via.placeholder.com par de vraies photos Picsum
+    return withPicsumUrls(data);
   } catch (err) {
     if (err instanceof Error && (err.message.includes('introuvable') || err.message.includes('Erreur lors'))) {
       throw err;
